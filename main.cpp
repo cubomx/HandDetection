@@ -12,11 +12,19 @@
 using namespace std;
 using namespace cv;
 
-void histogram(Mat);
+struct imageTo{
+    Mat output;
+    int umbral;
+};
+
+imageTo histogram(Mat, string, bool);
 void initializeArray(int []);
-void makeHistogram(int[], Mat);
+int makeHistogram(int[], Mat, string, bool);
 void decideExposure(float []);
-void tresholdBinary(Mat, uchar, uchar, int, int, string, int [], int, int);
+void tresholdBinary(Mat, uchar, uchar, int, int, string, int [], int);
+int cdf_pmf(float [], float [], int [], float, Mat, Mat);
+
+
 
 int main() {
     namedWindow("Cam", WINDOW_AUTOSIZE);
@@ -32,7 +40,8 @@ int main() {
         Mat frameGray;
         cvtColor(frame, frameGray, COLOR_BGR2GRAY);
         imshow("Cam", frameGray);
-        histogram(frameGray);
+        imageTo im = histogram(frameGray, "NOT EQUALIZED", false);
+        histogram(im.output, "EQUALIZED", true);
         waitKey(30);
         if (waitKey(30) >= 0){
             break;
@@ -41,36 +50,32 @@ int main() {
     return 0;
 }
 
-void histogram(Mat original){
-
-
+imageTo histogram(Mat original, string name, bool equalized){
+    imageTo im;
     Mat output;
     output = original.clone();
-
     int counts [256];
     float pmf[256], cdf[256];
     initializeArray(counts);
-
     float totalPixels = original.rows * original.cols;
-    makeHistogram(counts, original);
-    string imageVeredict = "Image is ";
-    for (int rgb = 0; rgb < 255; rgb++) {
-        pmf[rgb] = counts[rgb] / totalPixels;
-        cdf[rgb] = pmf[rgb];
-        if (rgb > 1)
-            cdf[rgb] += cdf[rgb-1];
-    }
-    decideExposure(cdf);
 
-    for (int j = 0; j < output.rows; j++){
-        for (int i = 0; i < output.cols; i++) {
-            output.at<uchar>(j,i) =  (uchar) (cdf[original.at<uchar>(j, i)] * 255);
-        }
+
+    int mean;
+    int umbral = makeHistogram(counts, original, name, equalized);
+    mean = cdf_pmf(cdf, pmf, counts, totalPixels, output, original);
+
+    im.output = output;
+    im.umbral = 95;
+    namedWindow(name, WINDOW_AUTOSIZE );
+    imshow(name, output);
+    if (equalized){
+        tresholdBinary(original, (uchar)0, (uchar)255, 85, overExposure-20, "Equalized", counts, ceil(umbral));
     }
 
-    namedWindow("NEW", WINDOW_AUTOSIZE );
-    imshow("NEW", output);
+    return im;
 }
+
+
 
 void initializeArray(int array []){
     for (int rgb = 0; rgb < 255; rgb++) {
@@ -78,8 +83,9 @@ void initializeArray(int array []){
     }
 }
 
-void makeHistogram(int counts [], Mat original){
-    int greatest = 0, less = -1, posMinor = 0;
+int makeHistogram(int counts [], Mat original, string name, bool equalized){
+    int sumaTotal = 0;
+    int greatest = 0;
     Mat histogram(768, 768, CV_8U);
     histogram.setTo(0);
     for (int j = 0; j < original.rows; j++){
@@ -89,25 +95,30 @@ void makeHistogram(int counts [], Mat original){
     }
 
     for (int pos = 0; pos < 256; pos++){
-        if (counts[pos] > greatest) {
+        if (counts[pos] > greatest ){
             greatest = counts[pos];
         }
-        if (pos > underExposure && pos < overExposure){
-            if (counts[pos] < less || less == -1){
-                posMinor = pos;
-                less = counts[pos];
+        else{
+            if (equalized){
+                if (pos > underExposure && pos < overExposure){
+                    sumaTotal += counts[pos];
+                }
             }
+
         }
 
     }
-    tresholdBinary(original, (uchar)0, (uchar) 255, posMinor, 250, "Detection", counts, less, ceil((float)less / (float)greatest * 100000));
+    float average = (float) sumaTotal / (float)(overExposure - underExposure);
+
     float max = 768.0f / greatest;
     for (int rgb = 0; rgb < 256; rgb++) {
         rectangle(histogram, Point(rgb * 3, histogram.rows), Point(rgb * 3 + 3, histogram.rows - ((max * counts[rgb]))), Scalar(255, 255, 255), FILLED, LINE_8, 0);
     }
-    namedWindow("Histogram", WINDOW_AUTOSIZE );
-    imshow("Histogram", histogram);
+    namedWindow(name + "Histogram", WINDOW_AUTOSIZE );
+    imshow(name + "Histogram", histogram);
 
+
+    return ceil(average);
 }
 
 /*
@@ -130,12 +141,12 @@ void decideExposure(float rgb []){
     }
 }
 
-void tresholdBinary(Mat original, uchar color1, uchar color2, int umbral, int upUmbral, string name, int rgb [], int upper, int offset){
+void tresholdBinary(Mat original, uchar color1, uchar color2, int umbral, int upUmbral, string name, int rgb [], int upper){
     Mat newFromOriginal = original.clone();
-
+    Mat other;
     for (int j = 0; j < newFromOriginal.rows; j++){
         for (int i = 0; i < newFromOriginal.cols; i++) {
-            if (original.at<uchar>(j,i) >= umbral || (original.at<uchar>(j,i) < upUmbral && (int) rgb[original.at<uchar>(j,i)] < upper - offset) ){
+            if (rgb[original.at<uchar>(j,i)] <= upper){
                 newFromOriginal.at<uchar>(j,i) = color2;
             }
             else{
@@ -143,8 +154,30 @@ void tresholdBinary(Mat original, uchar color1, uchar color2, int umbral, int up
             }
         }
     }
+    dilate(newFromOriginal, other, NULL);
     namedWindow(name, WINDOW_AUTOSIZE );
-    imshow(name, newFromOriginal);
+    imshow(name, other);
 }
 
+int cdf_pmf(float cdf [], float pmf [], int counts [], float totalPixels, Mat output, Mat original ){
+    int sumaTotal = 0;
+    for (int rgb = 0; rgb < 255; rgb++) {
+        pmf[rgb] = (float)counts[rgb] / totalPixels;
+        cdf[rgb] = pmf[rgb];
+        if (rgb >= 1){
+            cdf[rgb] += cdf[rgb-1];
+            if (rgb > underExposure && rgb < overExposure){
+                sumaTotal += counts[rgb];
+            }
+        }
+    }
 
+    decideExposure(cdf);
+
+    for (int j = 0; j < output.rows; j++){
+        for (int i = 0; i < output.cols; i++) {
+            output.at<uchar>(j,i) =  (uchar) (cdf[original.at<uchar>(j, i)] * 255);
+        }
+    }
+    return ceil((float)sumaTotal/(float)(overExposure-underExposure)/1.1);
+}
