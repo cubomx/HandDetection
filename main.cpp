@@ -1,3 +1,6 @@
+/*
+ * Code made by Felipe López Valdez and Sergio Velázquez
+ */
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -19,15 +22,15 @@ struct imageTo{
 
 imageTo histogram(Mat, string, bool);
 void initializeArray(int []);
-int makeHistogram(int[], Mat, string, bool);
-void decideExposure(float []);
-void tresholdBinary(Mat, uchar, uchar, int, int, string, int [], int);
-int cdf_pmf(float [], float [], int [], float, Mat, Mat);
-
-
+void makeHistogram(int[], Mat, string);
+bool decideExposure(float []);
+void tresholdBinary(Mat, uchar, uchar, int,  string);
+void cdf_pmf(float [], float [], int [], float, Mat, Mat);
+int umbral (int []);
 
 int main() {
     namedWindow("Cam", WINDOW_AUTOSIZE);
+    namedWindow("Canny_1", WINDOW_AUTOSIZE);
     VideoCapture cap(0);
     Mat(500, 500, CV_8U);
     if (!cap.isOpened()){
@@ -36,10 +39,15 @@ int main() {
     while (true){
         Mat frame;
         cap >> frame;
-
+        Mat out;
         Mat frameGray;
+        Mat edges;
         cvtColor(frame, frameGray, COLOR_BGR2GRAY);
-        imshow("Cam", frameGray);
+        Canny(frameGray, out, 20, 30);
+
+        Canny(frameGray, edges, 60, 128);
+        imshow("Cam", edges);
+        imshow("Canny_1", out);
         imageTo im = histogram(frameGray, "NOT EQUALIZED", false);
         histogram(im.output, "EQUALIZED", true);
         waitKey(30);
@@ -59,17 +67,16 @@ imageTo histogram(Mat original, string name, bool equalized){
     initializeArray(counts);
     float totalPixels = original.rows * original.cols;
 
-
-    int mean;
-    int umbral = makeHistogram(counts, original, name, equalized);
-    mean = cdf_pmf(cdf, pmf, counts, totalPixels, output, original);
-
+    makeHistogram(counts, original, name);
+    cdf_pmf(cdf, pmf, counts, totalPixels, output, original);
+    decideExposure(cdf);
     im.output = output;
     im.umbral = 95;
     namedWindow(name, WINDOW_AUTOSIZE );
     imshow(name, output);
-    if (equalized){
-        tresholdBinary(original, (uchar)0, (uchar)255, 85, overExposure-20, "Equalized", counts, ceil(umbral));
+    umbral(counts);
+    if (!equalized){
+        tresholdBinary(original, (uchar)255, (uchar)0, umbral(counts), "Equalized");
     }
 
     return im;
@@ -83,8 +90,7 @@ void initializeArray(int array []){
     }
 }
 
-int makeHistogram(int counts [], Mat original, string name, bool equalized){
-    int sumaTotal = 0;
+void makeHistogram(int counts [], Mat original, string name){
     int greatest = 0;
     Mat histogram(768, 768, CV_8U);
     histogram.setTo(0);
@@ -98,17 +104,8 @@ int makeHistogram(int counts [], Mat original, string name, bool equalized){
         if (counts[pos] > greatest ){
             greatest = counts[pos];
         }
-        else{
-            if (equalized){
-                if (pos > underExposure && pos < overExposure){
-                    sumaTotal += counts[pos];
-                }
-            }
-
-        }
 
     }
-    float average = (float) sumaTotal / (float)(overExposure - underExposure);
 
     float max = 768.0f / greatest;
     for (int rgb = 0; rgb < 256; rgb++) {
@@ -116,9 +113,6 @@ int makeHistogram(int counts [], Mat original, string name, bool equalized){
     }
     namedWindow(name + "Histogram", WINDOW_AUTOSIZE );
     imshow(name + "Histogram", histogram);
-
-
-    return ceil(average);
 }
 
 /*
@@ -126,27 +120,36 @@ int makeHistogram(int counts [], Mat original, string name, bool equalized){
  *  in a moderate proportion
  */
 
-void decideExposure(float rgb []){
+bool decideExposure(float rgb []){
     if (rgb[underExposure] > rgb[overExposure] - rgb[underExposure]){
-        if (rgb[underExposure] > rgb[255] - rgb[overExposure])
+        if (rgb[underExposure] > rgb[255] - rgb[overExposure]){
             cout << "Image is underexposure\n";
-        else
+            return false;
+        }
+
+        else{
             cout << "Image is overexposure\n";
+            return true;
+        }
+
+
     }
     else if (rgb[overExposure] - rgb[underExposure] > rgb[255] - rgb[overExposure]){
         cout << "Image is well contrasted\n";
+        return true;
     }
     else{
         cout << "Image is overexposure\n";
+        return true;
     }
 }
 
-void tresholdBinary(Mat original, uchar color1, uchar color2, int umbral, int upUmbral, string name, int rgb [], int upper){
+void tresholdBinary(Mat original, uchar color1, uchar color2, int umbral, string name){
     Mat newFromOriginal = original.clone();
     Mat other;
     for (int j = 0; j < newFromOriginal.rows; j++){
         for (int i = 0; i < newFromOriginal.cols; i++) {
-            if (rgb[original.at<uchar>(j,i)] <= upper){
+            if (original.at<uchar>(j,i) < umbral){
                 newFromOriginal.at<uchar>(j,i) = color2;
             }
             else{
@@ -159,7 +162,29 @@ void tresholdBinary(Mat original, uchar color1, uchar color2, int umbral, int up
     imshow(name, other);
 }
 
-int cdf_pmf(float cdf [], float pmf [], int counts [], float totalPixels, Mat output, Mat original ){
+int umbral(int histogramValues[]){
+    float acumVals1 = 0, acumVals2 = 0, media1 = 0, media2 = 0, segmentos = 2, tamano = 256;
+
+    for (int i = 0; i < tamano; i++) {
+        if (i < tamano / segmentos) {
+            if (histogramValues[i] > 0) {
+                acumVals1 += i;
+            }
+        }
+        else {
+            if (histogramValues[i] > 0) {
+                acumVals2 += i;
+            }
+        }
+    }
+
+    media1 = acumVals1 / tamano;
+    media2 = acumVals2 / tamano;
+    int umbral = media1 + media2;
+    return umbral;
+}
+
+void cdf_pmf(float cdf [], float pmf [], int counts [], float totalPixels, Mat output, Mat original ){
     int sumaTotal = 0;
     for (int rgb = 0; rgb < 255; rgb++) {
         pmf[rgb] = (float)counts[rgb] / totalPixels;
@@ -172,12 +197,11 @@ int cdf_pmf(float cdf [], float pmf [], int counts [], float totalPixels, Mat ou
         }
     }
 
-    decideExposure(cdf);
+
 
     for (int j = 0; j < output.rows; j++){
         for (int i = 0; i < output.cols; i++) {
             output.at<uchar>(j,i) =  (uchar) (cdf[original.at<uchar>(j, i)] * 255);
         }
     }
-    return ceil((float)sumaTotal/(float)(overExposure-underExposure)/1.1);
 }
