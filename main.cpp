@@ -33,9 +33,8 @@ int main() {
     namedWindow("Canny_1", WINDOW_AUTOSIZE);
     VideoCapture cap(0);
     Mat(500, 500, CV_8U);
-    if (!cap.isOpened()){
+    if (!cap.isOpened())
         return -1;
-    }
     while (true){
         Mat frame;
         cap >> frame;
@@ -51,9 +50,8 @@ int main() {
         imageTo im = histogram(frameGray, "NOT EQUALIZED", false);
         histogram(im.output, "EQUALIZED", true);
         waitKey(30);
-        if (waitKey(30) >= 0){
+        if (waitKey(30) >= 0)
             break;
-        }
     }
     return 0;
 }
@@ -75,19 +73,17 @@ imageTo histogram(Mat original, string name, bool equalized){
     namedWindow(name, WINDOW_AUTOSIZE );
     imshow(name, output);
     umbral(counts);
-    if (!equalized){
-        tresholdBinary(original, (uchar)255, (uchar)0, umbral(counts), "Equalized");
-    }
 
+    if (!equalized)
+        tresholdBinary(original, (uchar)255, (uchar)0, umbral(counts), "Equalized");
     return im;
 }
 
 
 
 void initializeArray(int array []){
-    for (int rgb = 0; rgb < 255; rgb++) {
+    for (int rgb = 0; rgb < 255; rgb++)
         array[rgb] = 0;
-    }
 }
 
 void makeHistogram(int counts [], Mat original, string name){
@@ -95,16 +91,13 @@ void makeHistogram(int counts [], Mat original, string name){
     Mat histogram(768, 768, CV_8U);
     histogram.setTo(0);
     for (int j = 0; j < original.rows; j++){
-        for (int i = 0; i < original.cols; i++) {
+        for (int i = 0; i < original.cols; i++)
             counts[(int)original.at<uchar>(j,i)]++;
-        }
     }
 
     for (int pos = 0; pos < 256; pos++){
-        if (counts[pos] > greatest ){
+        if (counts[pos] > greatest )
             greatest = counts[pos];
-        }
-
     }
 
     float max = 768.0f / greatest;
@@ -132,7 +125,6 @@ bool decideExposure(float rgb []){
             return true;
         }
 
-
     }
     else if (rgb[overExposure] - rgb[underExposure] > rgb[255] - rgb[overExposure]){
         cout << "Image is well contrasted\n";
@@ -146,58 +138,47 @@ bool decideExposure(float rgb []){
 
 void tresholdBinary(Mat original, uchar color1, uchar color2, int umbral, string name){
     Mat newFromOriginal = original.clone();
-    Mat other;
     for (int j = 0; j < newFromOriginal.rows; j++){
         for (int i = 0; i < newFromOriginal.cols; i++) {
-            if (original.at<uchar>(j,i) < umbral){
+            if (original.at<uchar>(j,i) < umbral)
                 newFromOriginal.at<uchar>(j,i) = color2;
-            }
-            else{
+            else
                 newFromOriginal.at<uchar>(j,i) = color1;
-            }
         }
     }
-    dilate(newFromOriginal, other, NULL);
     namedWindow(name, WINDOW_AUTOSIZE );
-    imshow(name, other);
+    imshow(name, newFromOriginal);
 }
 
 int umbral(int histogramValues[]){
-    float acumVals1 = 0, acumVals2 = 0, media1 = 0, media2 = 0, segmentos = 2, tamano = 256;
+    float acumVals1 = 0, acumVals2 = 0, median1 = 0, median2 = 0, sections = 2, size = 256;
 
-    for (int i = 0; i < tamano; i++) {
-        if (i < tamano / segmentos) {
-            if (histogramValues[i] > 0) {
+    for (int i = 0; i < size; i++) {
+        if (i < size / sections) {
+            if (histogramValues[i] > 0)
                 acumVals1 += i;
-            }
         }
         else {
-            if (histogramValues[i] > 0) {
+            if (histogramValues[i] > 0)
                 acumVals2 += i;
-            }
         }
     }
 
-    media1 = acumVals1 / tamano;
-    media2 = acumVals2 / tamano;
-    int umbral = media1 + media2;
+    median1 = acumVals1 / size;
+    median2 = acumVals2 / size;
+    int umbral = median1 + median2;
     return umbral;
 }
 
 void cdf_pmf(float cdf [], float pmf [], int counts [], float totalPixels, Mat output, Mat original ){
-    int sumaTotal = 0;
     for (int rgb = 0; rgb < 255; rgb++) {
         pmf[rgb] = (float)counts[rgb] / totalPixels;
         cdf[rgb] = pmf[rgb];
-        if (rgb >= 1){
+
+        if (rgb >= 1)
             cdf[rgb] += cdf[rgb-1];
-            if (rgb > underExposure && rgb < overExposure){
-                sumaTotal += counts[rgb];
-            }
-        }
+
     }
-
-
 
     for (int j = 0; j < output.rows; j++){
         for (int i = 0; i < output.cols; i++) {
